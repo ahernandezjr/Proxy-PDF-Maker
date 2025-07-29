@@ -29,6 +29,7 @@ ActionsWidget::ActionsWidget(PrintProxyPrepApplication& application, Project& pr
     cropper_progress_bar->setVisible(false);
     cropper_progress_bar->setRange(0, c_ProgressBarResolution);
     auto* render_button{ new QPushButton{ "Render Document" } };
+    auto* export_options_button{ new QPushButton{ "Export Render Options" } };
     auto* save_button{ new QPushButton{ "Save Project" } };
     auto* load_button{ new QPushButton{ "Load Project" } };
     auto* set_images_button{ new QPushButton{ "Set Image Folder" } };
@@ -38,6 +39,7 @@ ActionsWidget::ActionsWidget(PrintProxyPrepApplication& application, Project& pr
     const QWidget* buttons[]{
         cropper_progress_bar,
         render_button,
+        export_options_button,
         save_button,
         load_button,
         set_images_button,
@@ -54,11 +56,12 @@ ActionsWidget::ActionsWidget(PrintProxyPrepApplication& application, Project& pr
     layout->setColumnMinimumWidth(1, minimum_width + 10);
     layout->addWidget(cropper_progress_bar, 0, 0, 1, 2);
     layout->addWidget(render_button, 1, 0, 1, 2);
-    layout->addWidget(save_button, 2, 0);
-    layout->addWidget(load_button, 2, 1);
-    layout->addWidget(set_images_button, 3, 0);
-    layout->addWidget(open_images_button, 3, 1);
-    layout->addWidget(render_alignment_button, 4, 0, 1, 2);
+    layout->addWidget(export_options_button, 2, 0, 1, 2);
+    layout->addWidget(save_button, 3, 0);
+    layout->addWidget(load_button, 3, 1);
+    layout->addWidget(set_images_button, 4, 0);
+    layout->addWidget(open_images_button, 4, 1);
+    layout->addWidget(render_alignment_button, 5, 0, 1, 2);
     setLayout(layout);
 
     const auto render{
@@ -93,6 +96,26 @@ ActionsWidget::ActionsWidget(PrintProxyPrepApplication& application, Project& pr
             window()->setEnabled(false);
             render_window.ShowDuringWork(render_work);
             window()->setEnabled(true);
+        }
+    };
+
+    const auto export_render_options{
+        [=, this, &project]()
+        {
+            // Export render options to JSON for documentation, debugging, and reproducibility
+            // This allows users to share exact render configurations and troubleshoot issues
+            if (const auto json_path{ OpenFileDialog("Export Render Options", fs::current_path(), "JSON files (*.json)", FileDialogType::Save) })
+            {
+                try
+                {
+                    ExportRenderOptionsToJson(project, json_path.value());
+                    LogInfo("Render options exported successfully to: {}", json_path.value().string());
+                }
+                catch (const std::exception& e)
+                {
+                    LogError("Failed to export render options: {}", e.what());
+                }
+            }
         }
     };
 
@@ -192,6 +215,10 @@ ActionsWidget::ActionsWidget(PrintProxyPrepApplication& application, Project& pr
                      &QPushButton::clicked,
                      this,
                      render);
+    QObject::connect(export_options_button,
+                     &QPushButton::clicked,
+                     this,
+                     export_render_options);
     QObject::connect(save_button,
                      &QPushButton::clicked,
                      this,

@@ -12,6 +12,9 @@
 #include <ppp/pdf/backend.hpp>
 #include <ppp/pdf/util.hpp>
 
+#include <magic_enum/magic_enum.hpp>
+#include <nlohmann/json.hpp>
+
 fs::path GeneratePdf(const Project& project)
 {
     using CrossSegment = PdfPage::CrossSegment;
@@ -260,7 +263,14 @@ fs::path GeneratePdf(const Project& project)
         }
     }
 
-    return pdf->Write(project.m_Data.m_FileName);
+    const auto pdf_path{ pdf->Write(project.m_Data.m_FileName) };
+
+    // Automatically export render options alongside the PDF for documentation and reproducibility
+    // This ensures users always have a record of the exact settings used for each render
+    const auto json_path{ pdf_path.parent_path() / (project.m_Data.m_FileName.stem().string() + "_render_options.json") };
+    ExportRenderOptionsToJson(project, json_path);
+
+    return pdf_path;
 }
 
 fs::path GenerateTestPdf(const Project& project)
@@ -334,4 +344,116 @@ fs::path GenerateTestPdf(const Project& project)
     }
 
     return pdf->Write("alignment.pdf");
+}
+
+void ExportRenderOptionsToJson(const Project& project, const fs::path& output_path)
+{
+    // Export comprehensive render configuration to JSON format for documentation,
+    // debugging, and sharing exact render settings between users or systems
+    const auto base_unit{ g_Cfg.m_BaseUnit.m_Unit };
+    const auto base_unit_name{ g_Cfg.m_BaseUnit.m_ShortName };
+
+    nlohmann::json render_options{};
+
+    // Project information
+    render_options["project"] = {
+        { "image_dir", project.m_Data.m_ImageDir.string() },
+        { "crop_dir", project.m_Data.m_CropDir.string() },
+        { "output_filename", project.m_Data.m_FileName.string() }
+    };
+
+    // Card options
+    render_options["card_options"] = {
+        { "card_size_choice", project.m_Data.m_CardSizeChoice },
+        { "card_size", { { "width", project.CardSize().x / base_unit }, { "height", project.CardSize().y / base_unit }, { "unit", base_unit_name } } },
+        { "card_size_with_bleed", { { "width", project.CardSizeWithBleed().x / base_unit }, { "height", project.CardSizeWithBleed().y / base_unit }, { "unit", base_unit_name } } },
+        { "bleed_edge", project.m_Data.m_BleedEdge / base_unit },
+        { "spacing", { { "horizontal", project.m_Data.m_Spacing.x / base_unit }, { "vertical", project.m_Data.m_Spacing.y / base_unit }, { "unit", base_unit_name } } },
+        { "spacing_linked", project.m_Data.m_SpacingLinked },
+        { "corners", magic_enum::enum_name(project.m_Data.m_Corners) }
+    };
+
+    // Backside options
+    render_options["backside_options"] = {
+        { "enabled", project.m_Data.m_BacksideEnabled },
+        { "default_backside", project.m_Data.m_BacksideDefault.string() },
+        { "offset", project.m_Data.m_BacksideOffset / base_unit }
+    };
+
+    // Page options
+    render_options["page_options"] = {
+        { "page_size", project.m_Data.m_PageSize },
+        { "computed_page_size", { { "width", project.ComputePageSize().x / base_unit }, { "height", project.ComputePageSize().y / base_unit }, { "unit", base_unit_name } } },
+        { "orientation", magic_enum::enum_name(project.m_Data.m_Orientation) },
+        { "base_pdf", project.m_Data.m_BasePdf },
+        { "card_layout", { { "columns", project.m_Data.m_CardLayout.x }, { "rows", project.m_Data.m_CardLayout.y } } },
+        { "computed_cards_size", { { "width", project.ComputeCardsSize().x / base_unit }, { "height", project.ComputeCardsSize().y / base_unit }, { "unit", base_unit_name } } },
+        { "flip_on", magic_enum::enum_name(project.m_Data.m_FlipOn) }
+    };
+
+    // Margin options
+    render_options["margin_options"] = {
+        { "custom_margins_enabled", project.m_Data.m_CustomMargins.has_value() },
+        { "computed_margins", { { "width", project.ComputeMargins().x / base_unit }, { "height", project.ComputeMargins().y / base_unit }, { "unit", base_unit_name } } },
+        { "computed_max_margins", { { "width", project.ComputeMaxMargins().x / base_unit }, { "height", project.ComputeMaxMargins().y / base_unit }, { "unit", base_unit_name } } }
+    };
+
+    if (project.m_Data.m_CustomMargins.has_value())
+    {
+        render_options["margin_options"]["custom_margins"] = {
+            { "width", project.m_Data.m_CustomMargins->x / base_unit },
+            { "height", project.m_Data.m_CustomMargins->y / base_unit },
+            { "unit", base_unit_name }
+        };
+    }
+
+    // Guides options
+    render_options["guides_options"] = {
+        { "export_exact_guides", project.m_Data.m_ExportExactGuides },
+        { "enable_guides", project.m_Data.m_EnableGuides },
+        { "backside_enable_guides", project.m_Data.m_BacksideEnableGuides },
+        { "corner_guides", project.m_Data.m_CornerGuides },
+        { "cross_guides", project.m_Data.m_CrossGuides },
+        { "extended_guides", project.m_Data.m_ExtendedGuides },
+        { "guides_color_a", { { "r", project.m_Data.m_GuidesColorA.r }, { "g", project.m_Data.m_GuidesColorA.g }, { "b", project.m_Data.m_GuidesColorA.b } } },
+        { "guides_color_b", { { "r", project.m_Data.m_GuidesColorB.r }, { "g", project.m_Data.m_GuidesColorB.g }, { "b", project.m_Data.m_GuidesColorB.b } } },
+        { "guides_offset", project.m_Data.m_GuidesOffset / base_unit },
+        { "guides_thickness", project.m_Data.m_GuidesThickness / base_unit },
+        { "guides_length", project.m_Data.m_GuidesLength / base_unit }
+    };
+
+    // Render configuration
+    render_options["render_config"] = {
+        { "backend", magic_enum::enum_name(g_Cfg.m_Backend) },
+        { "image_format", magic_enum::enum_name(g_Cfg.m_PdfImageFormat) },
+        { "jpg_quality", g_Cfg.m_JpgQuality.value_or(100) },
+        { "png_compression", g_Cfg.m_PngCompression.value_or(6) },
+        { "color_cube", g_Cfg.m_ColorCube },
+        { "max_dpi", g_Cfg.m_MaxDPI / 1_dpi },
+        { "base_unit", base_unit_name }
+    };
+
+    // Card information
+    nlohmann::json cards_info{};
+    for (const auto& [card_name, card_info] : project.m_Data.m_Cards)
+    {
+        cards_info[card_name.string()] = {
+            { "quantity", card_info.m_Num },
+            { "hidden", card_info.m_Hidden },
+            { "backside", card_info.m_Backside.string() },
+            { "backside_short_edge", card_info.m_BacksideShortEdge }
+        };
+    }
+    render_options["cards"] = cards_info;
+
+    // Write to file
+    if (std::ofstream file{ output_path })
+    {
+        file << render_options.dump(2);
+        LogInfo("Render options exported to: {}", output_path.string());
+    }
+    else
+    {
+        LogError("Failed to write render options to: {}", output_path.string());
+    }
 }
